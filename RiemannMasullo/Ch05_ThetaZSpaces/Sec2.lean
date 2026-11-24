@@ -228,11 +228,216 @@ theorem sLocalAdelicThetaSpace_empty_frechet : IsFrechetTVS (Θₛ(∅)) :=
     (show IsNuclearTVS.{0} (ℬₛ(∅)) from sAdeleSchwartz_nuclear F ∅).2.1
     (empty_test_metrizable (F := F)) (Kₛ(∅)) (sLocalAdelicTheta_ker_isClosed (F := F) (S := ∅))
 
+/-- A closed subspace of a Fréchet space is Fréchet for the induced topology. -/
+private theorem sLocalAdelicThetaSpace_strictLF_frechet_submodule
+    {X : Type*} [AddCommGroup X] [Module ℂ X] [TopologicalSpace X]
+    (hX : IsFrechetTVS X) (A : Submodule ℂ X) (hA : IsClosed (A : Set X)) :
+    IsFrechetTVS A := by
+  obtain ⟨hadd, hpoly, hmet, hcomplete⟩ := hX
+  let : UniformSpace X := IsTopologicalAddGroup.rightUniformSpace X
+  let : IsUniformAddGroup X := isUniformAddGroup_of_addCommGroup
+  let : CompleteSpace X := hcomplete
+  let : IsUniformAddGroup A := A.toAddSubgroup.isUniformAddGroup
+  refine ⟨inferInstance, inferInstance, A.isEmbedding_subtype.metrizableSpace, ?_⟩
+  rw [IsUniformAddGroup.rightUniformSpace_eq]
+  exact hA.completeSpace_coe
+
+/-- An LF-space exhausted by increasing closed images of continuous linear injections
+from Fréchet spaces carries the strict limit topology of those images. -/
+private theorem sLocalAdelicThetaSpace_strictLF_of_closed_ranges
+    {E : Type*} [AddCommGroup E] [Module ℂ E] [TopologicalSpace E]
+    [IsTopologicalAddGroup E] [ContinuousSMul ℂ E] (hLF : IsLFSpace E)
+    {X : ℕ → Type*} [∀ n, AddCommGroup (X n)] [∀ n, Module ℂ (X n)] [∀ n, TopologicalSpace (X n)]
+    (hX : ∀ n, IsFrechetTVS (X n)) (i : ∀ n, X n →L[ℂ] E) (hi : ∀ n, Injective (i n))
+    (hm : Monotone (fun n ↦ (i n).range)) (hc : ∀ n, IsClosed (Set.range (i n)))
+    (hex : ∀ y : E, ∃ n, y ∈ Set.range (i n)) : IsStrictLFSpace E := by
+  obtain ⟨hT, Y, _, _, _, hY, jY, iY, hYlim⟩ := hLF
+  let : ∀ n, IsTopologicalAddGroup (X n) := fun n ↦ (hX n).choose
+  let : ∀ n, PolynormableSpace ℂ (X n) := fun n ↦ (hX n).choose_spec.1
+  -- Factor into the next range using its constant Fréchet presentation.
+  have step (n : ℕ) : ∃ j : X n →L[ℂ] X (n+1), (i (n+1)).comp j = i n := by
+    let b := i (n+1)
+    let f := (i n).codRestrict b.range (fun x ↦ hm n.le_succ ⟨x, rfl⟩)
+    obtain ⟨_, j, hj⟩ := frechet_factorization (fun _ ↦ hX (n+1)) (fun _ ↦ b.rangeRestrict)
+      (fun _ _ _ h ↦ hi (n+1) (congrArg Subtype.val h)) (fun _ ↦ le_rfl)
+      (fun ⟨_, x, hx⟩ ↦ ⟨0, x, Subtype.ext hx⟩) (hX n) f
+    exact ⟨j, ContinuousLinearMap.ext fun x ↦ congrArg Subtype.val (DFunLike.congr_fun hj x)⟩
+  choose j hj using step
+  have he (n : ℕ) : IsEmbedding (j n) := by
+    have eqv (x : X n) : i (n+1) (j n x) = i n x := DFunLike.congr_fun (hj n) x
+    have hr : Set.range (j n) = (i (n+1)) ⁻¹' Set.range (i n) := by
+      ext y
+      exact ⟨fun ⟨x, hx⟩ ↦ ⟨x, (eqv x).symm.trans (congrArg _ hx)⟩,
+        fun ⟨x, hx⟩ ↦ ⟨x, hi (n+1) ((eqv x).trans hx)⟩⟩
+    have hjinj : Injective (j n) := fun x y h ↦
+      hi n ((eqv x).symm.trans ((congrArg _ h).trans (eqv y)))
+    let r := (j n).rangeRestrict
+    have hs : Surjective r := fun ⟨_, x, hx⟩ ↦ ⟨x, Subtype.ext hx⟩
+    have hR := sLocalAdelicThetaSpace_strictLF_frechet_submodule (hX (n+1)) (j n).range
+      (show IsClosed (Set.range (j n)) from hr ▸ (hc n).preimage (i (n+1)).continuous)
+    let : TopologicalSpace.MetrizableSpace (X n) := (hX n).choose_spec.2.1
+    have hop := isOpenMap_of_surjective_toLF (isLFSpace_of_isFrechetTVS hR) (fun _ ↦ hX n)
+      (fun _ ↦ ContinuousLinearMap.id ℂ (X n)) (fun _ ↦ le_rfl) (fun x ↦ ⟨0, x, rfl⟩) r hs
+    exact IsEmbedding.subtypeVal.comp (IsOpenEmbedding.of_continuous_injective_isOpenMap
+      r.continuous (fun _ _ h ↦ hjinj (congrArg Subtype.val h)) hop).isEmbedding
+  have hlim : IsInjectiveLCLimit j i := by
+    refine ⟨hi, hj, hex, hYlim.topology_eq.trans ?_⟩
+    apply congrArg (fun P : Seminorm ℂ E → Prop ↦
+      (SeminormFamily.moduleFilterBasis (Subtype.val : Subtype P → Seminorm ℂ E)).topology)
+    funext p
+    apply propext
+    have hP : WithSeminorms (Subtype.val :
+      {q : Seminorm ℂ E // ∀ n, Continuous (q ∘ (iY n).toLinearMap)} → _) := ⟨hYlim.topology_eq⟩
+    refine ⟨fun hp n ↦ (hP.continuous_seminorm ⟨p, hp⟩).comp (i n).continuous, fun hp k ↦ ?_⟩
+    obtain ⟨n, v, hv⟩ := frechet_factorization hX i hi (fun n ↦ hm n.le_succ) hex (hY k) (iY k)
+    exact ((hp n).comp v.continuous).congr fun x ↦ congrArg p (DFunLike.congr_fun hv x)
+  -- Pass to the ranges as in AppD_SchwartzBruhat/Sec1c, isLFSpace_of_embedded_stages.
+  have hP : WithSeminorms (Subtype.val :
+      {p : Seminorm ℂ E // ∀ n, Continuous (p ∘ (i n).toLinearMap)} → _) := ⟨hlim.topology_eq⟩
+  let : PolynormableSpace ℂ E := hP.toPolynormableSpace
+  have hR (n : ℕ) : IsEmbedding (i n).rangeRestrict :=
+    IsEmbedding.subtypeVal.of_comp_iff.mp (hlim.isEmbedding_stage he n)
+  have hs (n : ℕ) : Surjective (i n).rangeRestrict := fun ⟨_, x, hx⟩ ↦ ⟨x, Subtype.ext hx⟩
+  refine ⟨hT, fun n ↦ (i n).range, hm, fun n ↦ ?_, hex, hlim.topology_eq.trans ?_⟩
+  · let R := (i n).range
+    let : UniformSpace (X n) := IsTopologicalAddGroup.rightUniformSpace _
+    let : IsUniformAddGroup (X n) := isUniformAddGroup_of_addCommGroup
+    let : UniformSpace R := IsTopologicalAddGroup.rightUniformSpace _
+    let : IsUniformAddGroup R := isUniformAddGroup_of_addCommGroup
+    let : TopologicalSpace.MetrizableSpace (X n) := (hX n).choose_spec.2.1
+    let e := (Equiv.ofBijective _ ⟨(hR n).injective, hs n⟩).toHomeomorphOfIsInducing (hR n).isInducing
+    refine ⟨inferInstance, inferInstance, e.symm.isEmbedding.metrizableSpace, ?_⟩
+    exact ((AddMonoidHom.isUniformInducing_of_isInducing (f := (i n).rangeRestrict)
+      (hR n).isInducing).completeSpace_congr (hs n)).mp (hX n).choose_spec.2.2
+  · apply congrArg (fun P : Seminorm ℂ E → Prop ↦
+      (SeminormFamily.moduleFilterBasis (Subtype.val : Subtype P → Seminorm ℂ E)).topology)
+    funext p
+    exact propext (forall_congr' fun n ↦
+      (((hR n).isInducing.isOpenQuotientMap_of_surjective (hs n)).isQuotientMap.continuous_iff
+        (g := p ∘ (i n).range.subtype)).symm)
+
+/-- A closed subspace of the theta quotient contained in the image of a Fréchet test
+stage is the image of an injective Fréchet model. Restrict the test stage to the
+preimage of that subspace, then quotient by the kernel of the restriction. -/
+private theorem sLocalAdelicThetaSpace_strictLF_of_stage_models
+    {E : Type*} [AddCommGroup E] [Module ℂ E] [TopologicalSpace E]
+    [IsTopologicalAddGroup E] [ContinuousSMul ℂ E] (hLF : IsLFSpace E)
+    (D : ℕ → Submodule ℂ E) (hm : Monotone D) (hc : ∀ n, IsClosed (D n : Set E))
+    (hex : ∀ y : E, ∃ n, y ∈ D n)
+    {X : ℕ → Type*} [∀ n, AddCommGroup (X n)] [∀ n, Module ℂ (X n)] [∀ n, TopologicalSpace (X n)]
+    (hX : ∀ n, IsFrechetTVS (X n)) (L : ∀ n, X n →L[ℂ] E) (hD : ∀ n, D n ≤ (L n).range) :
+    IsStrictLFSpace E := by
+  let : T2Space E := hLF.1
+  let A n := (D n).comap (L n).toLinearMap
+  let f n := (L n).comp (A n).subtypeL
+  let i n := (f n).ker.liftQL (f n) le_rfl
+  have hr (n : ℕ) : (i n).range = D n := by
+    ext y
+    constructor
+    · rintro ⟨u, rfl⟩
+      obtain ⟨x, rfl⟩ := (f n).ker.mkQ_surjective u
+      exact x.property
+    · intro hy
+      obtain ⟨x, hx⟩ := hD n hy
+      exact ⟨(f n).ker.mkQ ⟨x, show L n x ∈ D n from hx.symm ▸ hy⟩, hx⟩
+  have hA (n : ℕ) : IsFrechetTVS (A n) :=
+    sLocalAdelicThetaSpace_strictLF_frechet_submodule (hX n) (A n) ((hc n).preimage (L n).continuous)
+  refine sLocalAdelicThetaSpace_strictLF_of_closed_ranges hLF
+    (fun n ↦ isFrechetTVS_quotient (hA n) _ (f n).isClosed_ker) i ?_ ?_ ?_ ?_
+  · exact fun n ↦ LinearMap.ker_eq_bot.mp ((f n).ker.ker_liftQ_eq_bot' (f n).toLinearMap rfl)
+  · intro m n h
+    change (i m).range ≤ (i n).range
+    rw [hr, hr]
+    exact hm h
+  · exact fun n ↦ show IsClosed ((i n).range : Set E) from (hr n).symm ▸ hc n
+  · exact fun y ↦ (hex y).imp fun n hn ↦ show y ∈ (i n).range from (hr n).symm ▸ hn
+
+/-- Take the closures of the stage images in the quotient. A uniform stage for the
+representatives of each closure supplies its Fréchet model. -/
+private theorem sLocalAdelicThetaSpace_strictLF_of_stage_closure
+    {G : Type*} [CommGroup G] [TopologicalSpace G] [IsTopologicalGroup G]
+    [T2Space G] [LocallyCompactSpace G] [SecondCountableTopology G]
+    (K : Submodule ℂ (SchwartzBruhat G)) (hLF : IsLFSpace (SchwartzBruhat G ⧸ K))
+    (hstage : ∀ (a : BruhatStructuralPair G) (e : ElementaryLCAPresentation a.quotient),
+      ∃ (b : BruhatStructuralPair G) (d : ElementaryLCAPresentation b.quotient),
+        ((SchwartzBruhat.ofStage a e).range ⊔ K).topologicalClosure ≤
+          (SchwartzBruhat.ofStage b d).range ⊔ K) :
+    IsStrictLFSpace (SchwartzBruhat G ⧸ K) := by
+  obtain ⟨a, e, _, ha, hcof, _, _⟩ := schwartzBruhat_exists_topologicallyExact (G := G)
+  let D n := (SchwartzBruhat.ofStage (a n) (e n)).range
+  have grow {a b : BruhatStructuralPair G} (hab : a ≤ b) (p : ElementaryLCAPresentation a.quotient)
+      (q : ElementaryLCAPresentation b.quotient) :
+      (SchwartzBruhat.ofStage a p).range ≤ (SchwartzBruhat.ofStage b q).range := by
+    obtain ⟨j, hj, _⟩ := schwartzBruhatStage_transition hab p q
+    rintro _ ⟨x, rfl⟩
+    exact ⟨j x, SchwartzBruhat.ext (congrFun (hj x))⟩
+  let C n := ((D n).map K.mkQ).topologicalClosure
+  have hmono : Monotone C := fun m n h ↦
+    closure_mono (Submodule.map_mono (grow (ha h) (e m) (e n)))
+  have hex (y : SchwartzBruhat G ⧸ K) : ∃ n, y ∈ C n := by
+    obtain ⟨f, rfl⟩ := K.mkQ_surjective y
+    obtain ⟨c, p, x, hx⟩ := (mem_schwartzBruhatSubmodule_iff _).mp
+      ((SchwartzBruhat.toSubmodule G f).property)
+    obtain ⟨n, hn⟩ := hcof c
+    have hf : f ∈ (SchwartzBruhat.ofStage c p).range := ⟨x, SchwartzBruhat.ext (congrFun hx)⟩
+    exact ⟨n, subset_closure ⟨f, grow hn p (e n) hf, rfl⟩⟩
+  choose b d hb using fun n ↦ hstage (a n) (e n)
+  let L n := K.mkQL.comp
+    (⟨SchwartzBruhat.ofStage (b n) (d n), SchwartzBruhat.continuous_ofStage _ _⟩ :
+      SchwartzBruhatStage (d n) →L[ℂ] SchwartzBruhat G)
+  refine sLocalAdelicThetaSpace_strictLF_of_stage_models hLF C hmono
+    (fun _ ↦ isClosed_closure) hex (fun _ ↦ elementarySchwartz_isFrechet) L ?_
+  intro n y hy
+  obtain ⟨f, rfl⟩ := K.mkQ_surjective y
+  have sat (U : Submodule ℂ (SchwartzBruhat G)) : (U.map K.mkQ).comap K.mkQ = U ⊔ K := by
+    rw [Submodule.comap_map_eq, Submodule.ker_mkQ]
+  have hf : f ∈ (D n ⊔ K).topologicalClosure := by
+    rw [← sat (D n)]
+    exact K.isOpenQuotientMap_mkQL.isOpenMap.preimage_closure_subset_closure_preimage hy
+  have hrep := hb n hf
+  rw [← sat] at hrep
+  obtain ⟨_, ⟨x, rfl⟩, hx⟩ := hrep
+  exact ⟨x, hx⟩
+
+/-- Paper: Theorem 5.2.1.1(1), p. 230.
+For each Bruhat test stage, a single stage contains representatives modulo the theta
+kernel of all tests in the closure of the first stage plus the kernel. Page 231 gives
+Fréchet quotients of individual stages. What remains is a uniform bound on the support
+and level of local constancy of the finite factors needed for these representatives. -/
+private theorem sLocalAdelicThetaSpace_strictLF_stage_closure
+    {F : Type*} [Field F] [NumberField F] {S : Finset (HeightOneSpectrum (𝓞 F))}
+    (hS : S.Nonempty) (a : BruhatStructuralPair (Multiplicative (SAdeleRing F S)))
+    (e : ElementaryLCAPresentation a.quotient) :
+    let K := LinearMap.ker (sLocalAdelicTheta F S)
+    ∃ (b : BruhatStructuralPair (Multiplicative (SAdeleRing F S)))
+      (d : ElementaryLCAPresentation b.quotient),
+      ((SchwartzBruhat.ofStage a e).range ⊔ K).topologicalClosure ≤
+        (SchwartzBruhat.ofStage b d).range ⊔ K := by
+  sorry
+
 /-- Paper: Theorem 5.2.1.1(1), p. 230.
 The S-local theta space is a strict LF-space.
 Deviation: The Fréchet stages inherit nuclearity from the separately stated
 nuclearity of the whole space under `isNuclearTVS_submodule`. -/
-theorem sLocalAdelicThetaSpace_strictLF : IsStrictLFSpace (Θₛ(S)) := by sorry
+theorem sLocalAdelicThetaSpace_strictLF : IsStrictLFSpace (Θₛ(S)) := by
+  classical
+  obtain hS | hS := S.eq_empty_or_nonempty
+  · subst S
+    let E := Θₛ(∅)
+    exact sLocalAdelicThetaSpace_strictLF_of_closed_ranges sLocalAdelicThetaSpace_lf
+      (fun _ ↦ sLocalAdelicThetaSpace_empty_frechet (F := F)) (fun _ ↦ ContinuousLinearMap.id ℂ E)
+      (fun _ ↦ injective_id) monotone_const (fun _ ↦ Set.range_id ▸ isClosed_univ)
+      (fun y ↦ ⟨0, y, rfl⟩)
+  let G := Multiplicative (SAdeleRing F S)
+  let (w : S) : ProperSpace (w.val.adicCompletion F) := properSpace_adicCompletion w.val
+  let (w : InfinitePlace F) : SecondCountableTopology w.Completion :=
+    (InfinitePlace.Completion.isometry_extensionEmbedding w).isEmbedding.secondCountableTopology
+  let A := ((w : InfinitePlace F) → w.Completion) × ((w : S) → w.val.adicCompletion F)
+  let : T2Space G := inferInstanceAs (T2Space A)
+  let : LocallyCompactSpace G := inferInstanceAs (LocallyCompactSpace A)
+  let : SecondCountableTopology G := inferInstanceAs (SecondCountableTopology A)
+  exact sLocalAdelicThetaSpace_strictLF_of_stage_closure (Kₛ(S)) sLocalAdelicThetaSpace_lf
+    (sLocalAdelicThetaSpace_strictLF_stage_closure hS)
 
 /-- Paper: Theorem 5.2.1.1(1), p. 230.
 The S-local theta quotient is complete. -/
